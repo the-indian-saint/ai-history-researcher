@@ -6,10 +6,10 @@ build-backend = "hatchling.build"
 name = "ai-research-framework"
 version = "1.0.0"
 description = "AI-powered research framework for ancient Indian history"
-readme = "README.md"
-license = {file = "LICENSE"}
+# readme = "README.md"  # Not needed in Docker build
+license = {text = "MIT"}
 authors = [
-    {name = "AI Research Framework Team", email = "team@airesearch.com"}
+    {name = "AI Research Framework Team", email = "rohan.matkar489@gmail.com"}
 ]
 requires-python = ">=3.11"
 dependencies = [
@@ -50,6 +50,7 @@ dependencies = [
     "asyncio-throttle>=1.0.0",
     "tenacity>=8.2.0",
     "loguru>=0.7.0",
+    "asyncpg>=0.30.0",
 ]
 
 [project.optional-dependencies]
