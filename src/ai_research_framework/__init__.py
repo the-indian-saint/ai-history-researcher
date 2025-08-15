@@ -8,8 +8,8 @@ access lesser-known historical information.
 """
 
 __version__ = "0.1.0"
-__author__ = "AI Research Team"
-__email__ = "research@example.com"
+__author__ = "Rohan Matkar"
+__email__ = "rohan.matkar489@gmail.com"
 __license__ = "MIT"
 
 from .api.main import app
