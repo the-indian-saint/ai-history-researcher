@@ -1,0 +1,135 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11, 3.12]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install UV
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        uv sync --all-extras --dev
+
+    - name: Create necessary directories
+      run: |
+        mkdir -p data logs temp reports
+
+    - name: Lint with ruff
+      run: |
+        uv run ruff check src tests
+        uv run ruff format --check src tests
+
+    - name: Type check with mypy
+      run: |
+        uv run mypy src
+
+    - name: Run unit tests
+      run: |
+        uv run pytest tests/unit -v --cov=src/ai_research_framework --cov-report=xml --cov-report=html
+
+    - name: Run integration tests
+      run: |
+        uv run pytest tests/integration -v --maxfail=5
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Archive test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          reports/
+          htmlcov/
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install UV
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python
+      run: uv python install 3.11
+
+    - name: Install dependencies
+      run: uv sync --all-extras --dev
+
+    - name: Run security checks
+      run: |
+        uv run bandit -r src/
+        uv run safety check
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker build -t ai-research-framework:latest .
+
+    - name: Test Docker image
+      run: |
+        docker run --rm -d --name test-container -p 8000:8000 ai-research-framework:latest
+        sleep 10
+        curl -f http://localhost:8000/health || exit 1
+        docker stop test-container
+
+  performance:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install UV
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python
+      run: uv python install 3.11
+
+    - name: Install dependencies
+      run: uv sync --all-extras --dev
+
+    - name: Run performance tests
+      run: |
+        uv run pytest tests/ -m "performance" -v --benchmark-only
+
+    - name: Archive performance results
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-results
+        path: .benchmarks/
+
