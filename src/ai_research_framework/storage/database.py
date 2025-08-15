@@ -45,7 +45,7 @@ class ProcessingStatus(str, Enum):
 
 class Document(Base):
     """Document model for storing processed historical documents."""
-    __tablename__ = "documents"
+    __tablename__ = "research_documents"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(500), nullable=False)
@@ -135,7 +135,7 @@ class Citation(Base):
     __tablename__ = "citations"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("research_documents.id"), nullable=False)
     
     # Citation details
     citation_text = Column(Text, nullable=False)
@@ -158,7 +158,7 @@ class Citation(Base):
 # Association table for many-to-many relationship between queries and documents
 query_documents = Base.metadata.tables.get('query_documents') or \
     Column('query_id', UUID(as_uuid=True), ForeignKey('research_queries.id'), primary_key=True), \
-    Column('document_id', UUID(as_uuid=True), ForeignKey('documents.id'), primary_key=True)
+    Column('document_id', UUID(as_uuid=True), ForeignKey('research_documents.id'), primary_key=True)
 
 # Create the association table properly
 from sqlalchemy import Table
@@ -166,8 +166,88 @@ query_documents = Table(
     'query_documents',
     Base.metadata,
     Column('query_id', UUID(as_uuid=True), ForeignKey('research_queries.id'), primary_key=True),
-    Column('document_id', UUID(as_uuid=True), ForeignKey('documents.id'), primary_key=True)
+    Column('document_id', UUID(as_uuid=True), ForeignKey('research_documents.id'), primary_key=True)
 )
+
+
+class AnalysisResult(Base):
+    """Analysis results for processed documents."""
+    __tablename__ = "analysis_results"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("research_documents.id"), nullable=False)
+    
+    # Analysis data
+    analysis_type = Column(String(50), nullable=False)  # credibility, bias, entity_extraction, etc.
+    result = Column(JSON, nullable=False)  # JSON result of the analysis
+    confidence = Column(Float)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_analysis_document', 'document_id'),
+        Index('idx_analysis_type', 'analysis_type'),
+    )
+
+
+class ProcessingJob(Base):
+    """Background processing jobs."""
+    __tablename__ = "processing_jobs"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Job details
+    job_type = Column(String(50), nullable=False)  # document_processing, web_scraping, etc.
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    input_data = Column(JSON)  # Input parameters for the job
+    result = Column(JSON)  # Result of the job
+    error_message = Column(Text)
+    progress = Column(Float, default=0.0)  # 0.0 to 100.0
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_jobs_status', 'status'),
+        Index('idx_jobs_type', 'job_type'),
+        Index('idx_jobs_created', 'created_at'),
+    )
+
+
+class UserSession(Base):
+    """User sessions for authentication and tracking."""
+    __tablename__ = "user_sessions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # User data
+    user_id = Column(String(100), nullable=False)
+    username = Column(String(100))
+    email = Column(String(200))
+    
+    # Session data
+    token = Column(String(500), nullable=False)
+    is_active = Column(Boolean, default=True)
+    ip_address = Column(String(50))
+    user_agent = Column(String(500))
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_activity = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime)
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_sessions_user', 'user_id'),
+        Index('idx_sessions_token', 'token'),
+        Index('idx_sessions_active', 'is_active'),
+    )
 
 
 class VectorEmbedding(Base):
@@ -175,7 +255,7 @@ class VectorEmbedding(Base):
     __tablename__ = "vector_embeddings"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("research_documents.id"), nullable=False)
     
     # Embedding data
     text_chunk = Column(Text, nullable=False)
@@ -255,7 +335,7 @@ async def check_database_health() -> Dict[str, Any]:
             row = result.fetchone()
             
             # Get table counts
-            document_count = await db.execute(text("SELECT COUNT(*) FROM documents"))
+            document_count = await db.execute(text("SELECT COUNT(*) FROM research_documents"))
             query_count = await db.execute(text("SELECT COUNT(*) FROM research_queries"))
             
             return {
@@ -299,7 +379,7 @@ async def get_document_by_id(document_id: str) -> Optional[Document]:
     """Get document by ID."""
     async with get_database() as db:
         result = await db.execute(
-            text("SELECT * FROM documents WHERE id = :id"),
+            text("SELECT * FROM research_documents WHERE id = :id"),
             {"id": document_id}
         )
         return result.fetchone()
@@ -313,7 +393,7 @@ async def search_documents(
 ) -> List[Document]:
     """Search documents by text query."""
     async with get_database() as db:
-        sql = "SELECT * FROM documents WHERE processed_text ILIKE :query"
+        sql = "SELECT * FROM research_documents WHERE processed_text ILIKE :query"
         params = {"query": f"%{query}%"}
         
         if source_types:
