@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Float, Boolean, 
-    ForeignKey, JSON, text, Index, UniqueConstraint
+    ForeignKey, JSON, text, Index, UniqueConstraint, Enum as SQLEnum
 )
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -21,6 +21,97 @@ from ..config import settings
 engine = None
 async_session_factory = None
 Base = declarative_base()
+
+
+class UserRole(str, Enum):
+    """User roles for authorization."""
+    USER = "user"
+    RESEARCHER = "researcher"
+    ADMIN = "admin"
+    SUPERADMIN = "superadmin"
+
+
+class User(Base):
+    """User model for authentication and authorization."""
+    __tablename__ = "users"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, nullable=False)
+    username = Column(String(100), unique=True, nullable=False)
+    full_name = Column(String(255))
+    
+    # Authentication
+    password_hash = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    email_verified_at = Column(DateTime)
+    
+    # Authorization
+    role = Column(SQLEnum(UserRole), default=UserRole.USER, nullable=False)
+    permissions = Column(JSON, default=list)  # List of specific permissions
+    
+    # API keys for external services (encrypted)
+    api_keys = Column(JSON, default=dict)  # {"openai": "encrypted_key", ...}
+    
+    # Settings and preferences
+    preferences = Column(JSON, default=dict)
+    language = Column(String(10), default="english")
+    timezone = Column(String(50), default="UTC")
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login_at = Column(DateTime)
+    login_count = Column(Integer, default=0)
+    
+    # Relationships
+    research_queries = relationship("ResearchQuery", back_populates="user")
+    api_tokens = relationship("APIToken", back_populates="user", cascade="all, delete-orphan")
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_users_email', 'email'),
+        Index('idx_users_username', 'username'),
+        Index('idx_users_role', 'role'),
+        Index('idx_users_is_active', 'is_active'),
+        Index('idx_users_created_at', 'created_at'),
+    )
+
+
+class APIToken(Base):
+    """API tokens for user authentication."""
+    __tablename__ = "api_tokens"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
+    token = Column(String(255), unique=True, nullable=False)
+    name = Column(String(100))  # Optional name for the token
+    
+    # Token metadata
+    scopes = Column(JSON, default=list)  # List of allowed scopes
+    last_used_at = Column(DateTime)
+    expires_at = Column(DateTime)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Rate limiting
+    rate_limit = Column(Integer, default=100)  # Requests per minute
+    rate_limit_window = Column(Integer, default=60)  # Window in seconds
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="api_tokens")
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_api_tokens_token', 'token'),
+        Index('idx_api_tokens_user_id', 'user_id'),
+        Index('idx_api_tokens_is_active', 'is_active'),
+        Index('idx_api_tokens_expires_at', 'expires_at'),
+    )
 
 
 class SourceType(str, Enum):
@@ -99,7 +190,7 @@ class ResearchQuery(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_text = Column(Text, nullable=False)
-    user_id = Column(String(100))  # For future user management
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     
     # Query parameters
     time_period_start = Column(String(50))
@@ -120,6 +211,7 @@ class ResearchQuery(Base):
     completed_at = Column(DateTime)
     
     # Relationships
+    user = relationship("User", back_populates="research_queries")
     documents = relationship("Document", secondary="query_documents", back_populates="research_queries")
     
     # Indexes

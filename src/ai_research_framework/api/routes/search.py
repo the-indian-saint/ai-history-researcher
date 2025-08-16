@@ -9,6 +9,8 @@ from sqlalchemy import text
 
 from ...storage.database import get_database, search_documents
 from ...storage.vector_storage import get_vector_storage
+from ...search.hybrid_search import HybridSearch
+from ...search.semantic_search import SemanticSearch
 from ...utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,10 +20,12 @@ router = APIRouter()
 class SearchRequest(BaseModel):
     """Search request model."""
     query: str = Field(..., description="Search query text")
-    search_type: str = Field(default="semantic", description="Search type: 'semantic' or 'keyword'")
+    search_type: str = Field(default="hybrid", description="Search type: 'semantic', 'fulltext', 'hybrid'")
     filters: Dict[str, Any] = Field(default={}, description="Additional filters")
     limit: int = Field(default=10, ge=1, le=100, description="Maximum results to return")
     include_snippets: bool = Field(default=True, description="Include text snippets in results")
+    include_facets: bool = Field(default=False, description="Include search facets")
+    fusion_method: str = Field(default="weighted", description="Fusion method: 'weighted' or 'rrf'")
 
 
 class SearchResult(BaseModel):
@@ -47,13 +51,42 @@ class SearchResponse(BaseModel):
 
 @router.post("/", response_model=SearchResponse)
 async def search(request: SearchRequest):
-    """Perform semantic or keyword search across documents."""
+    """Perform hybrid, semantic, or full-text search across documents."""
     start_time = datetime.utcnow()
     
     try:
         results = []
         
-        if request.search_type == "semantic":
+        # Use hybrid search for most cases
+        if request.search_type == "hybrid":
+            async with get_database() as session:
+                hybrid_search = HybridSearch(
+                    session=session,
+                    fusion_method=request.fusion_method
+                )
+                
+                search_results = await hybrid_search.search(
+                    query=request.query,
+                    limit=request.limit,
+                    filters=request.filters,
+                    search_types=["semantic", "fulltext"],
+                    include_facets=request.include_facets
+                )
+                
+                # Format results for API response
+                for result in search_results.get("results", []):
+                    results.append(SearchResult(
+                        document_id=result.get("document_id"),
+                        title=result.get("title", result.get("metadata", {}).get("title", "")),
+                        source_url=result.get("metadata", {}).get("source_url"),
+                        author=result.get("metadata", {}).get("author"),
+                        relevance_score=result.get("final_score", result.get("score", 0)),
+                        snippet=result.get("text", result.get("headline", ""))[:500] if request.include_snippets else None,
+                        highlights=[],
+                        metadata=result.get("metadata", {})
+                    ))
+        
+        elif request.search_type == "semantic":
             # Semantic search using vector embeddings
             try:
                 vector_store = await get_vector_storage()

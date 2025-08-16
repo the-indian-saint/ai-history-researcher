@@ -1,6 +1,7 @@
 """Configuration management for the AI Research Framework."""
 
 import os
+from functools import lru_cache
 from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,7 +30,7 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str = Field(
-        default="sqlite:///./research.db",
+        default="sqlite+aiosqlite:///./research.db",
         description="Database connection URL"
     )
     database_pool_size: int = Field(default=10, description="Database connection pool size")
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = Field(default="redis://localhost:6379", description="Redis connection URL")
     redis_db: int = Field(default=0, description="Redis database number")
-    redis_password: Optional[str] = Field(default=None, description="Redis password")
+    redis_password: str = Field(default="", description="Redis password")
     
     # ChromaDB
     chromadb_host: str = Field(default="localhost", description="ChromaDB host")
@@ -46,9 +47,9 @@ class Settings(BaseSettings):
     chromadb_collection_name: str = Field(default="research_documents", description="ChromaDB collection name")
     
     # AI Services
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
-    openai_api_base: Optional[str] = Field(default=None, description="OpenAI API base URL")
-    anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
+    openai_api_key: Optional[str] = Field(default="your_openai_api_key_here", description="OpenAI API key")
+    openai_api_base: Optional[str] = Field(default="", description="OpenAI API base URL")
+    anthropic_api_key: Optional[str] = Field(default="your_anthropic_api_key_here", description="Anthropic API key")
     
     # OCR Configuration
     tesseract_cmd: str = Field(default="/usr/bin/tesseract", description="Tesseract command path")
@@ -155,4 +156,14 @@ settings = Settings()
 
 # Create necessary directories on import
 settings.create_directories()
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """Get cached settings instance.
+    
+    Returns:
+        Settings: Application settings instance
+    """
+    return Settings()
 
