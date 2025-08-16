@@ -34,8 +34,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Initialize ChromaDB
     try:
-        # Skip vector storage for simplified version
-        logging.info("Vector storage initialization skipped for simplified version")
+        from ..storage.vector_storage import init_vector_storage
+        await init_vector_storage()
+        logging.info("Vector storage initialized successfully")
     except Exception as e:
         logging.error(f"Failed to initialize vector storage: {e}")
         # Don't raise - continue without vector storage

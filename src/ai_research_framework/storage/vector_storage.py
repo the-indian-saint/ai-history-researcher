@@ -15,13 +15,10 @@ async def init_vector_storage() -> None:
     """Initialize ChromaDB connection."""
     global chroma_client, collection
     
+    # Use the correct HttpClient initialization for ChromaDB 1.0.x
     chroma_client = chromadb.HttpClient(
         host=settings.chromadb_host,
-        port=settings.chromadb_port,
-        settings=ChromaSettings(
-            chroma_client_auth_provider="chromadb.auth.basic.BasicAuthClientProvider",
-            chroma_client_auth_credentials_provider="chromadb.auth.basic.BasicAuthCredentialsProvider"
-        )
+        port=settings.chromadb_port
     )
     
     # Get or create collection
