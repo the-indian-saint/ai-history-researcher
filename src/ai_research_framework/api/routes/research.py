@@ -173,7 +173,7 @@ async def get_research_results(research_id: str) -> ResearchResults:
             # Get associated documents
             docs_result = await db.execute(
                 text("""
-                SELECT d.* FROM documents d
+                SELECT d.* FROM research_documents d
                 JOIN query_documents qd ON d.id = qd.document_id
                 WHERE qd.query_id = :query_id
                 ORDER BY d.credibility_score DESC
