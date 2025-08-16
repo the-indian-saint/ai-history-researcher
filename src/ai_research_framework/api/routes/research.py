@@ -8,6 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from ...storage.database import (
     create_research_query, update_query_progress, get_database,
@@ -126,7 +127,7 @@ async def get_research_status(research_id: str) -> ResearchStatus:
     try:
         async with get_database() as db:
             result = await db.execute(
-                "SELECT * FROM research_queries WHERE id = :id",
+                text("SELECT * FROM research_queries WHERE id = :id"),
                 {"id": research_id}
             )
             query_record = result.fetchone()
@@ -158,7 +159,7 @@ async def get_research_results(research_id: str) -> ResearchResults:
         async with get_database() as db:
             # Get query record
             query_result = await db.execute(
-                "SELECT * FROM research_queries WHERE id = :id",
+                text("SELECT * FROM research_queries WHERE id = :id"),
                 {"id": research_id}
             )
             query_record = query_result.fetchone()
@@ -171,12 +172,12 @@ async def get_research_results(research_id: str) -> ResearchResults:
             
             # Get associated documents
             docs_result = await db.execute(
-                """
+                text("""
                 SELECT d.* FROM documents d
                 JOIN query_documents qd ON d.id = qd.document_id
                 WHERE qd.query_id = :query_id
                 ORDER BY d.credibility_score DESC
-                """,
+                """),
                 {"query_id": research_id}
             )
             documents = docs_result.fetchall()
@@ -253,7 +254,7 @@ async def list_research_queries(
             sql += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
             params.update({"limit": limit, "offset": offset})
             
-            result = await db.execute(sql, params)
+            result = await db.execute(text(sql), params)
             queries = result.fetchall()
             
             # Format response
@@ -361,7 +362,7 @@ async def process_research_query(research_id: str, request: ResearchRequest):
                     # Update document with credibility score
                     async with get_database() as db:
                         await db.execute(
-                            "UPDATE documents SET credibility_score = :score WHERE id = :id",
+                            text("UPDATE documents SET credibility_score = :score WHERE id = :id"),
                             {"score": credibility_result.result.score, "id": doc.id}
                         )
                         await db.commit()
@@ -380,7 +381,7 @@ async def process_research_query(research_id: str, request: ResearchRequest):
                     # Update document with bias assessment
                     async with get_database() as db:
                         await db.execute(
-                            "UPDATE documents SET bias_assessment = :assessment WHERE id = :id",
+                            text("UPDATE documents SET bias_assessment = :assessment WHERE id = :id"),
                             {"assessment": json.dumps(bias_result.result.__dict__), "id": doc.id}
                         )
                         await db.commit()
@@ -392,7 +393,7 @@ async def process_research_query(research_id: str, request: ResearchRequest):
                     # Update document with entities
                     async with get_database() as db:
                         await db.execute(
-                            "UPDATE documents SET entities = :entities WHERE id = :id",
+                            text("UPDATE documents SET entities = :entities WHERE id = :id"),
                             {"entities": json.dumps(entity_result.result.__dict__), "id": doc.id}
                         )
                         await db.commit()
@@ -433,13 +434,13 @@ async def process_research_query(research_id: str, request: ResearchRequest):
         # Step 6: Update final status
         async with get_database() as db:
             await db.execute(
-                """
+                text("""
                 UPDATE research_queries 
                 SET status = :status, processing_progress = :progress, 
                     total_sources_found = :total, completed_at = :completed,
                     results_summary = :summary, generated_script = :script
                 WHERE id = :id
-                """,
+                """),
                 {
                     "status": "completed",
                     "progress": 1.0,
