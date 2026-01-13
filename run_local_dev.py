@@ -20,7 +20,7 @@ os.environ.update({
     "PORT": "8000",
     
     # Database - using SQLite for local testing
-    "DATABASE_URL": "sqlite+aiosqlite:///./local_dev.db",
+    "DATABASE_URL": "sqlite+aiosqlite://./local_dev.db",
     
     # Redis - optional for local testing (will use in-memory fallback)
     "REDIS_URL": "",  # Empty to trigger fallback
