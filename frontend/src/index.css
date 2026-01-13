@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm Parchment / Off-white Background */
+    --background: 40 33% 98%;
+    --foreground: 224 71% 4%;
+    /* Deep Indigo Text */
+
+    --card: 40 33% 98%;
+    --card-foreground: 224 71% 4%;
+
+    --popover: 40 33% 98%;
+    --popover-foreground: 224 71% 4%;
+
+    /* Primary: Deep Royal Indigo */
+    --primary: 243 75% 25%;
+    --primary-foreground: 40 33% 98%;
+
+    /* Secondary: Saffron / Gold */
+    --secondary: 32 95% 44%;
+    --secondary-foreground: 40 33% 98%;
+
+    --muted: 40 20% 90%;
+    --muted-foreground: 220 10% 40%;
+
+    --accent: 32 50% 90%;
+    --accent-foreground: 243 75% 25%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 32 30% 85%;
+    --input: 32 30% 85%;
+    --ring: 243 75% 25%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    /* Deep Night Sky Background */
+    --background: 240 25% 10%;
+    --foreground: 36 30% 90%;
+    /* Soft Cold Gold Text */
+
+    --card: 240 20% 12%;
+    --card-foreground: 36 30% 90%;
+
+    --popover: 240 20% 12%;
+    --popover-foreground: 36 30% 90%;
+
+    /* Primary: Vibrantly lighter indigo/violet */
+    --primary: 243 70% 65%;
+    --primary-foreground: 240 25% 10%;
+
+    /* Secondary: Rich Gold/Bronze */
+    --secondary: 35 80% 50%;
+    --secondary-foreground: 240 25% 10%;
+
+    --muted: 240 15% 18%;
+    --muted-foreground: 240 10% 60%;
+
+    --accent: 240 15% 18%;
+    --accent-foreground: 36 30% 90%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 240 15% 20%;
+    --input: 240 15% 20%;
+    --ring: 35 80% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
