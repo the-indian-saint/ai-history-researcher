@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from ..config import settings
-from .routes import auth, research, documents, search, analysis, health
+from .routes import auth, research, documents, search, analysis, health, generate
 from .middleware import LoggingMiddleware, RateLimitMiddleware
 from ..utils.logging import setup_logging
 
@@ -115,6 +115,7 @@ app.include_router(research.router, prefix="/api/v1/research", tags=["Research"]
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
 app.include_router(search.router, prefix="/api/v1/search", tags=["Search"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["Analysis"])
+app.include_router(generate.router, prefix="/api/v1/generate", tags=["Generation"])
 
 
 @app.exception_handler(HTTPException)
