@@ -1,9 +1,12 @@
-"""Simplified web scraping and data collection module."""
+"""Web scraping and data collection module."""
 
 import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+import aiohttp
+from bs4 import BeautifulSoup
+from duckduckgo_search import DDGS
 
 from ..config import settings
 from ..utils.logging import get_logger
@@ -34,39 +37,52 @@ class ArchiveResult:
 
 
 class WebScraper:
-    """Simplified web scraper for historical sources."""
+    """Web scraper for historical sources."""
     
     def __init__(self):
         self.visited_urls = set()
     
-    async def scrape_url(self, url: str, use_selenium: bool = False) -> ScrapingResult:
-        """Scrape content from a single URL (simplified)."""
+    async def scrape_url(self, url: str) -> ScrapingResult:
+        """Scrape content from a single URL."""
         start_time = asyncio.get_event_loop().time()
         
         try:
-            # Simplified scraping - just return mock data for now
-            mock_content = f"""
-            Historical content from {url}
-            
-            This is a simplified implementation that would normally:
-            1. Download the webpage content
-            2. Parse HTML with BeautifulSoup
-            3. Extract main text content
-            4. Identify relevant links
-            5. Extract metadata
-            
-            For a full implementation, this would use aiohttp and BeautifulSoup4.
-            """
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, 
+                    headers={"User-Agent": settings.user_agent},
+                    timeout=settings.scraping_timeout
+                ) as response:
+                    if response.status != 200:
+                        raise Exception(f"HTTP {response.status}")
+                    
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # Remove scripts and styles
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+                    
+                    text = soup.get_text(separator='\n')
+                    
+                    # Extract lines and drop blank ones
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    text = '\n'.join(chunk for chunk in chunks if chunk)
+                    
+                    title = soup.title.string if soup.title else url
+                    
+                    links = [a['href'] for a in soup.find_all('a', href=True) if a['href'].startswith('http')]
             
             processing_time = asyncio.get_event_loop().time() - start_time
             
             return ScrapingResult(
                 success=True,
                 url=url,
-                title=f"Content from {url}",
-                content=mock_content,
-                metadata={"source": "simplified_scraper", "type": "mock"},
-                links=[],
+                title=title or "No Title",
+                content=text[:10000],  # Limit content length
+                metadata={"source": "web_scraper", "length": len(text)},
+                links=links[:50],  # Limit links
                 processing_time=processing_time
             )
             
@@ -90,74 +106,88 @@ class WebScraper:
         query: str, 
         max_results: int = 10
     ) -> List[ScrapingResult]:
-        """Search academic sources for historical content (simplified)."""
+        """Search academic sources for historical content using DuckDuckGo."""
         results = []
         
-        # Mock academic search results
-        mock_sources = [
-            {
-                "title": f"Academic Paper on {query}",
-                "url": f"https://scholar.google.com/search?q={query.replace(' ', '+')}",
-                "content": f"This academic paper discusses {query} in the context of ancient Indian history."
-            },
-            {
-                "title": f"Research Article: {query}",
-                "url": f"https://academia.edu/search?q={query.replace(' ', '+')}",
-                "content": f"A comprehensive research article examining {query} and its historical significance."
-            }
-        ]
-        
-        for i, source in enumerate(mock_sources[:max_results]):
-            result = ScrapingResult(
-                success=True,
-                url=source["url"],
-                title=source["title"],
-                content=source["content"],
-                metadata={"source": "academic_search", "query": query, "rank": i+1},
-                links=[]
-            )
-            results.append(result)
+        try:
+            # Use run_in_executor for synchronous DDGS
+            loop = asyncio.get_event_loop()
+            
+            def run_search():
+                with DDGS() as ddgs:
+                    # Enforce academic focus in query
+                    search_query = f"{query} academic history research filetype:html"
+                    return list(ddgs.text(search_query, max_results=max_results))
+            
+            search_results = await loop.run_in_executor(None, run_search)
+            
+            for res in search_results:
+                result = ScrapingResult(
+                    success=True,
+                    url=res['href'],
+                    title=res['title'],
+                    content=res['body'],
+                    metadata={"source": "duckduckgo_academic", "query": query},
+                    links=[]
+                )
+                results.append(result)
+                
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
         
         return results
 
 
 class InternetArchiveCollector:
-    """Simplified collector for Internet Archive historical documents."""
+    """Collector for Internet Archive historical documents."""
     
     def __init__(self):
-        pass
+        self.base_url = "https://archive.org/advancedsearch.php"
     
     async def search_documents(
         self, 
         query: str, 
-        collection: str = None,
         max_results: int = 20
     ) -> ArchiveResult:
-        """Search Internet Archive for historical documents (simplified)."""
+        """Search Internet Archive for historical documents."""
         try:
-            # Mock Internet Archive results
-            mock_items = []
+            params = {
+                'q': f'{query} AND mediatype:(texts) AND year:[-2000 TO 1900]',
+                'fl[]': 'identifier,title,creator,date,description,subject,language',
+                'sort[]': 'downloads desc',
+                'rows': max_results,
+                'page': 1,
+                'output': 'json'
+            }
             
-            for i in range(min(max_results, 5)):  # Return up to 5 mock items
-                item = {
-                    'identifier': f'mock_item_{i+1}',
-                    'title': f'Historical Document {i+1}: {query}',
-                    'creator': f'Author {i+1}',
-                    'date': f'19{50+i*10}',
-                    'description': f'A historical document related to {query} from the Internet Archive.',
-                    'subject': [query, 'Ancient India', 'History'],
-                    'language': 'English',
-                    'url': f'https://archive.org/details/mock_item_{i+1}',
-                    'download_url': f'https://archive.org/download/mock_item_{i+1}/document.pdf',
-                    'file_formats': ['PDF', 'Text']
-                }
-                mock_items.append(item)
-            
-            return ArchiveResult(
-                success=True,
-                items=mock_items,
-                total_found=len(mock_items)
-            )
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.base_url, params=params) as response:
+                    if response.status != 200:
+                        raise Exception(f"Internet Archive API returned {response.status}")
+                    
+                    data = await response.json()
+                    docs = data.get('response', {}).get('docs', [])
+                    
+                    items = []
+                    for doc in docs:
+                        identifier = doc.get('identifier')
+                        items.append({
+                            'identifier': identifier,
+                            'title': doc.get('title'),
+                            'creator': doc.get('creator'),
+                            'date': doc.get('date'),
+                            'description': doc.get('description', 'No description'),
+                            'subject': doc.get('subject'),
+                            'language': doc.get('language'),
+                            'url': f"https://archive.org/details/{identifier}",
+                            'download_url': f"https://archive.org/download/{identifier}/{identifier}.pdf"
+                        })
+                    
+                    return ArchiveResult(
+                        success=True,
+                        items=items,
+                        total_found=data.get('response', {}).get('numFound', 0)
+                    )
             
         except Exception as e:
             logger.error(f"Internet Archive search failed: {e}")

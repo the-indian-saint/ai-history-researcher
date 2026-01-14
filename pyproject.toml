@@ -41,6 +41,8 @@ dependencies = [
     "anthropic>=0.7.0",
     "sentence-transformers>=2.2.0",
     "spacy>=3.7.0",
+    # Search
+    "duckduckgo-search>=6.3.0",
     # Internet Archive
     "internetarchive>=3.5.0",
     # Utilities
