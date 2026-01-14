@@ -131,19 +131,61 @@ class AIAnalyzer(LoggerMixin):
             'delhi': r'\b(delhi|dilli|indraprastha)\b'
         }
     
+    async def _call_llm(self, messages: List[Dict[str, str]], **kwargs) -> str:
+            """Unified LLM call supporting both Cloud and Local models."""
+            try:
+                if settings.use_local_model and self.openai_client:
+                    # Use local model via OpenAI compatible endpoint
+                    self.log_info(f"Using local model: {settings.local_model_name}")
+                    response = await self.openai_client.chat.completions.create(
+                        model=settings.local_model_name,
+                        messages=messages,
+                        **kwargs
+                    )
+                    return response.choices[0].message.content
+                
+                elif self.anthropic_client:
+                    response = await self.anthropic_client.messages.create(
+                        model="claude-3-sonnet-20240229",
+                        messages=messages,
+                        max_tokens=kwargs.get("max_tokens", 1000)
+                    )
+                    return response.content[0].text
+                    
+                elif self.openai_client:
+                    response = await self.openai_client.chat.completions.create(
+                        model="gpt-4-turbo-preview",
+                        messages=messages,
+                        **kwargs
+                    )
+                    return response.choices[0].message.content
+                    
+                else:
+                    raise Exception("No AI clients available")
+                    
+            except Exception as e:
+                self.log_error(f"LLM call failed: {e}")
+                raise
+
     def _initialize_clients(self):
         """Initialize AI service clients."""
         try:
-            if hasattr(settings, 'openai_api_key') and settings.openai_api_key:
-                try:
-                    import openai
-                    self.openai_client = openai.AsyncOpenAI(
-                        api_key=settings.openai_api_key,
-                        base_url=getattr(settings, 'openai_api_base', None)
-                    )
-                    self.log_info("OpenAI client initialized")
-                except ImportError:
-                    self.log_warning("OpenAI package not available")
+            # Initialize OpenAI client (works for both OpenAI and Local Ollama)
+            import openai
+            
+            if settings.use_local_model:
+                self.openai_client = openai.AsyncOpenAI(
+                    api_key="ollama",  # Not required for Ollama but field is needed
+                    base_url=settings.local_model_base_url
+                )
+                self.log_info(f"Local model client initialized at {settings.local_model_base_url}")
+            
+            elif hasattr(settings, 'openai_api_key') and settings.openai_api_key:
+                self.openai_client = openai.AsyncOpenAI(
+                    api_key=settings.openai_api_key,
+                    base_url=getattr(settings, 'openai_api_base', None)
+                )
+                self.log_info("OpenAI client initialized")
             
             if hasattr(settings, 'anthropic_api_key') and settings.anthropic_api_key:
                 try:
@@ -269,8 +311,43 @@ class AIAnalyzer(LoggerMixin):
         
         with LogContext("credibility_analysis", text_length=len(text)):
             try:
-                # Use fallback analysis for now (can be enhanced with actual AI calls)
-                result = await self._fallback_analysis(text, AnalysisType.CREDIBILITY)
+                # Use LLM for analysis if clients are available
+                if self.openai_client or self.anthropic_client:
+                    prompt = f"""Analyze the credibility of the following historical text. 
+                    Consider the source type, probable author intent, and linguistic markers.
+                    
+                    Metadata: {json.dumps(metadata or {})}
+                    
+                    Text:
+                    {text[:4000]}
+                    
+                    Return a JSON object with:
+                    - score: float (0.0 to 1.0)
+                    - level: string (very_high, high, medium, low, very_low)
+                    - factors: dict of factor scores
+                    - reasoning: string explanation
+                    - confidence: float (0.0 to 1.0)
+                    """
+                    
+                    response = await self._call_llm([
+                        {"role": "system", "content": "You are an expert historian specializing in source criticism and historiography. Return only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ], temperature=0.3, response_format={"type": "json_object"} if settings.use_local_model else None)
+                    
+                    # Clean response and parse JSON (handle potential markdown fences)
+                    clean_json = response.replace("```json", "").replace("```", "").strip()
+                    data = json.loads(clean_json)
+                    
+                    result = CredibilityResult(
+                        score=data.get('score', 0.5),
+                        level=CredibilityLevel(data.get('level', 'medium').lower()),
+                        factors=data.get('factors', {}),
+                        reasoning=data.get('reasoning', 'No reasoning provided'),
+                        confidence=data.get('confidence', 0.8)
+                    )
+                else:
+                    # Fallback if no LLM configured/available
+                    result = await self._fallback_analysis(text, AnalysisType.CREDIBILITY)
                 
                 processing_time = (time.time() - start_time) * 1000
                 
@@ -307,7 +384,39 @@ class AIAnalyzer(LoggerMixin):
         
         with LogContext("bias_detection", text_length=len(text)):
             try:
-                result = await self._fallback_analysis(text, AnalysisType.BIAS_DETECTION)
+                if self.openai_client or self.anthropic_client:
+                    prompt = f"""Analyze the provided text for historical biases (colonial, religious, political, cultural, gender, etc.).
+                    
+                    Context: {json.dumps(context or {})}
+                    
+                    Text:
+                    {text[:4000]}
+                    
+                    Return a JSON object with:
+                    - bias_types: list of strings (colonial, religious, political, cultural, temporal, gender, regional, none)
+                    - bias_scores: dict mapping bias type to score (0.0-1.0)
+                    - overall_bias_score: float
+                    - reasoning: string explanation
+                    - confidence: float
+                    """
+                    
+                    response = await self._call_llm([
+                        {"role": "system", "content": "You are an expert historian. Detect bias with nuance. Return only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ], temperature=0.3, response_format={"type": "json_object"} if settings.use_local_model else None)
+                    
+                    clean_json = response.replace("```json", "").replace("```", "").strip()
+                    data = json.loads(clean_json)
+                    
+                    result = BiasResult(
+                        bias_types=[BiasType(b.lower()) for b in data.get('bias_types', ['none']) if b.lower() in [e.value for e in BiasType]],
+                        bias_scores=data.get('bias_scores', {}),
+                        overall_bias_score=data.get('overall_bias_score', 0.0),
+                        reasoning=data.get('reasoning', 'No reasoning provided'),
+                        confidence=data.get('confidence', 0.8)
+                    )
+                else:
+                    result = await self._fallback_analysis(text, AnalysisType.BIAS_DETECTION)
                 
                 processing_time = (time.time() - start_time) * 1000
                 
@@ -344,7 +453,42 @@ class AIAnalyzer(LoggerMixin):
         
         with LogContext("entity_extraction", text_length=len(text), entity_types=entity_types):
             try:
-                result = await self._fallback_analysis(text, AnalysisType.ENTITY_EXTRACTION)
+                if self.openai_client or self.anthropic_client:
+                    prompt = f"""Extract historical entities from the text.
+                    Focus on: {', '.join(entity_types)}
+                    
+                    Text:
+                    {text[:4000]}
+                    
+                    Return a JSON object with:
+                    - people: list of objects (name, role, significance)
+                    - places: list of objects (name, modern_location, type)
+                    - dynasties: list of objects (name, period, region)
+                    - dates: list of objects (date, event)
+                    - events: list of objects (name, date, description)
+                    - concepts: list of objects (name, definition)
+                    - confidence: float
+                    """
+                    
+                    response = await self._call_llm([
+                        {"role": "system", "content": "You are an expert historian. Extract structured data. Return only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ], temperature=0.1, response_format={"type": "json_object"} if settings.use_local_model else None)
+                    
+                    clean_json = response.replace("```json", "").replace("```", "").strip()
+                    data = json.loads(clean_json)
+                    
+                    result = EntityResult(
+                        people=data.get('people', []),
+                        places=data.get('places', []),
+                        dynasties=data.get('dynasties', []),
+                        dates=data.get('dates', []),
+                        events=data.get('events', []),
+                        concepts=data.get('concepts', []),
+                        confidence=data.get('confidence', 0.8)
+                    )
+                else:
+                    result = await self._fallback_analysis(text, AnalysisType.ENTITY_EXTRACTION)
                 
                 processing_time = (time.time() - start_time) * 1000
                 
@@ -382,90 +526,55 @@ class AIAnalyzer(LoggerMixin):
         
         with LogContext("script_generation", topic=topic, target_length=target_length):
             try:
-                # Enhanced script generation with research data
-                script_content = f"""# YouTube Script: {topic}
-
-## Hook (0:00 - 0:30)
-Welcome back to our channel! Today, we're diving deep into {topic}, one of the most fascinating aspects of ancient Indian history that often gets overlooked. Stay tuned because what you're about to learn might completely change how you view this period!
-
-## Introduction (0:30 - 1:30)
-[Show map/timeline graphic]
-Before we begin, make sure to hit that subscribe button and ring the notification bell for more incredible historical content!
-
-{topic} represents a crucial period in Indian history, and today we'll explore:
-"""
                 
-                # Add key points from research data
-                key_points = []
-                sources_cited = []
-                
-                for i, data in enumerate(research_data[:5], 1):
-                    title = data.get('title', f'Research Point {i}')
-                    content = data.get('content', '')[:300]
-                    source_url = data.get('source_url', '')
+
+                if self.openai_client or self.anthropic_client:
+                    # Prepare research context
+                    research_summary = "\n\n".join([
+                        f"Source: {d.get('title')}\nContent: {d.get('content', '')[:500]}"
+                        for d in research_data[:5]
+                    ])
                     
-                    key_points.append(title)
-                    if source_url:
-                        sources_cited.append(source_url)
+                    prompt = f"""Create a YouTube script for a {target_length}-minute video about "{topic}".
+                    Style: {style}
                     
-                    script_content += f"""
-## Main Point {i}: {title} ({i+1}:30 - {i+2}:30)
-[Visual: Historical artwork/map]
-{content}...
-
-This shows us how {topic} influenced the broader historical narrative of ancient India.
-"""
-                
-                script_content += f"""
-## Historical Significance ({len(research_data)+2}:30 - {target_length-2}:00)
-[Show timeline with key events]
-The importance of {topic} cannot be overstated. It represents a turning point that shaped:
-- Political structures of the time
-- Cultural and religious practices
-- Economic systems
-- Social hierarchies
-
-## Conclusion ({target_length-2}:00 - {target_length-1}:00)
-As we've seen today, {topic} offers us incredible insights into ancient Indian civilization. The evidence we've examined shows just how sophisticated and complex these historical periods were.
-
-## Call to Action ({target_length-1}:00 - {target_length}:00)
-What aspect of {topic} fascinated you the most? Let me know in the comments below! 
-
-If you enjoyed this deep dive into ancient Indian history, please give this video a thumbs up and subscribe for more content like this. 
-
-Next week, we'll be exploring [related topic], so make sure you don't miss it!
-
-Thanks for watching, and I'll see you in the next video!
-
----
-## Sources and References:
-{chr(10).join(f"- {source}" for source in sources_cited[:10])}
-
-## Video Structure:
-- Hook: 0:00-0:30
-- Introduction: 0:30-1:30
-- Main Content: 1:30-{target_length-2}:00
-- Conclusion: {target_length-2}:00-{target_length-1}:00
-- Call to Action: {target_length-1}:00-{target_length}:00
-
-## Estimated Word Count: ~{len(script_content.split())} words
-## Estimated Speaking Time: ~{target_length} minutes
-"""
-                
-                result = ScriptResult(
-                    script=script_content,
-                    structure={
-                        'hook': '0:00-0:30',
-                        'introduction': '0:30-1:30',
-                        'main_content': f'1:30-{target_length-2}:00',
-                        'conclusion': f'{target_length-2}:00-{target_length-1}:00',
-                        'call_to_action': f'{target_length-1}:00-{target_length}:00'
-                    },
-                    key_points=key_points,
-                    sources_cited=sources_cited,
-                    estimated_duration=target_length,
-                    target_audience=f"{style.title()} audience interested in ancient Indian history"
-                )
+                    Research Data:
+                    {research_summary}
+                    
+                    Return a JSON object with:
+                    - script: string (full markdown script with sections, timestamps, and visual cues)
+                    - structure: dict mapping section to timestamp range
+                    - key_points: list of strings
+                    - sources_cited: list of strings
+                    - estimated_duration: int
+                    - target_audience: string
+                    """
+                    
+                    response = await self._call_llm([
+                        {"role": "system", "content": "You are a professional scriptwriter for educational history channels. Return only valid JSON."},
+                        {"role": "user", "content": prompt}
+                    ], temperature=0.7, response_format={"type": "json_object"} if settings.use_local_model else None)
+                    
+                    clean_json = response.replace("```json", "").replace("```", "").strip()
+                    data = json.loads(clean_json)
+                    
+                    # Ensure mock structure if LLM fails to provide good structure
+                    structure = data.get('structure', {
+                        'intro': '0:00-1:00',
+                        'main': f'1:00-{target_length-1}:00',
+                        'outro': f'{target_length-1}:00-{target_length}:00'
+                    })
+                    
+                    result = ScriptResult(
+                        script=data.get('script', 'Failed to generate script content.'),
+                        structure=structure,
+                        key_points=data.get('key_points', []),
+                        sources_cited=data.get('sources_cited', []),
+                        estimated_duration=data.get('estimated_duration', target_length),
+                        target_audience=data.get('target_audience', 'General Audience')
+                    )
+                else:
+                    result = await self._fallback_analysis("", AnalysisType.SCRIPT_GENERATION)
                 
                 processing_time = (time.time() - start_time) * 1000
                 

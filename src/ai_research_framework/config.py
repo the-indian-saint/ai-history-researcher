@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     openai_api_base: Optional[str] = Field(default="", description="OpenAI API base URL")
     anthropic_api_key: Optional[str] = Field(default="your_anthropic_api_key_here", description="Anthropic API key")
     
+    # Local Model
+    use_local_model: bool = Field(default=False, description="Use local model instead of cloud APIs")
+    local_model_base_url: str = Field(default="http://ollama:11434/v1", description="Local model base URL (OpenAI compatible)")
+    local_model_name: str = Field(default="phi3:mini", description="Local model name")
+    
     # OCR Configuration
     tesseract_cmd: str = Field(default="/usr/bin/tesseract", description="Tesseract command path")
     ocr_confidence_threshold: float = Field(default=80.0, description="OCR confidence threshold (0-100)")

@@ -10,6 +10,8 @@ A comprehensive AI-powered research framework designed specifically for creating
 - **Semantic Search**: Vector-based search across historical documents and sources
 - **Citation Management**: Automatic citation generation and source tracking
 - **YouTube Script Generation**: AI-assisted script creation with proper attributions
+- **Local Model Support**: Run completely offline using local LLMs (Ollama)
+- **Real-Time Web Browsing**: Search and scrape live web content for up-to-date research
 
 ## 🏗️ Architecture
 
@@ -29,6 +31,7 @@ The framework follows a modular microservices architecture:
 - Redis 7+
 - Tesseract OCR with language packs
 - At least 4GB RAM and 10GB disk space
+- Docker & Docker Compose (for local model support)
 
 ## 🛠️ Installation
 
@@ -75,6 +78,26 @@ The framework follows a modular microservices architecture:
 
 The application will be available at `http://localhost:8000`.
 
+### Local Model Setup (Offline Mode)
+
+This framework supports running completely offline using [Ollama](https://ollama.com).
+
+1. **Start the stack with Ollama**:
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **Auto-Pull Model**:
+   The stack includes an initializer that will automatically pull `phi3:mini`. Wait a few moments for the model to benefit ready.
+   
+   If you wish to use a different model:
+   ```bash
+   docker compose exec ollama ollama pull your-model
+   ```
+
+3. **Enable Local Mode**:
+   Set text `USE_LOCAL_MODEL=true` in your `.env` file (see Configuration).
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -94,7 +117,13 @@ CHROMADB_PORT=8001
 
 # AI Services
 OPENAI_API_KEY=your_openai_api_key
+
 ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# Local AI (Ollama)
+USE_LOCAL_MODEL=false          # Set to true to use local model
+LOCAL_MODEL_BASE_URL=http://ollama:11434/v1
+LOCAL_MODEL_NAME=phi3:mini
 
 # OCR Configuration
 TESSERACT_CMD=/usr/bin/tesseract
