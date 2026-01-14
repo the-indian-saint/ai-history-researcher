@@ -1,14 +1,21 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { Loader2, CheckCircle, AlertCircle, Youtube } from "lucide-react";
+import { Loader2, CheckCircle, AlertCircle, Youtube, Image as ImageIcon, Volume2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress"; // Need to create
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Need to create
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Timeline } from "@/components/visualizations/Timeline";
+import { HistoricalMap } from "@/components/visualizations/HistoricalMap";
 
 export default function ResearchStatus() {
     const { id } = useParams();
+    const [audioUrl, setAudioUrl] = useState<string | null>(null);
+    const [imageUrl, setImageUrl] = useState<string | null>(null);
+    const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+    const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
     // Poll for status
     const { data: status, isLoading: isStatusLoading } = useQuery({
@@ -32,6 +39,33 @@ export default function ResearchStatus() {
         },
         enabled: status?.status === "completed",
     });
+
+    const handleGenerateAudio = async () => {
+        if (!results) return;
+        setIsGeneratingAudio(true);
+        try {
+            const text = `Research complete for ${results.query}. Found ${results.total_sources} sources. ${JSON.stringify(results.analysis_summary)}`;
+            const res = await axios.post("/api/v1/generate/audio", { text });
+            setAudioUrl(res.data.url);
+        } catch (e) {
+            console.error("Audio generation failed", e);
+        } finally {
+            setIsGeneratingAudio(false);
+        }
+    };
+
+    const handleGenerateImage = async () => {
+        if (!results) return;
+        setIsGeneratingImage(true);
+        try {
+            const res = await axios.post("/api/v1/generate/image", { prompt: `Historical illustration of ${results.query} in ancient India style` });
+            setImageUrl(res.data.url);
+        } catch (e) {
+            console.error("Image generation failed", e);
+        } finally {
+            setIsGeneratingImage(false);
+        }
+    };
 
     if (isStatusLoading || !status) {
         return <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>;
@@ -74,8 +108,38 @@ export default function ResearchStatus() {
                         </div>
                     )}
                     {isCompleted && (
-                        <p className="text-green-600 font-medium">Research completed successfully.</p>
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                            <p className="text-green-600 font-medium">Research completed successfully.</p>
+                            <div className="flex gap-2">
+                                <Button variant="outline" size="sm" onClick={handleGenerateAudio} disabled={isGeneratingAudio}>
+                                    {isGeneratingAudio ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Volume2 className="h-4 w-4 mr-2" />}
+                                    {audioUrl ? "Regenerate Audio" : "Listen to Summary"}
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={handleGenerateImage} disabled={isGeneratingImage}>
+                                    {isGeneratingImage ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ImageIcon className="h-4 w-4 mr-2" />}
+                                    {imageUrl ? "Regenerate Image" : "Generate Illustration"}
+                                </Button>
+                            </div>
+                        </div>
                     )}
+
+                    {/* Media Players */}
+                    {isCompleted && (
+                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+                            {audioUrl && (
+                                <div className="bg-muted p-2 rounded-md flex items-center gap-2 animate-in fade-in">
+                                    <Volume2 className="h-4 w-4" />
+                                    <audio controls src={audioUrl} className="w-full h-8" />
+                                </div>
+                            )}
+                            {imageUrl && (
+                                <div className="border rounded-md overflow-hidden animate-in fade-in">
+                                    <img src={imageUrl} alt="Generated Historical Illustration" className="w-full h-48 object-cover" />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {isFailed && (
                         <p className="text-red-600 font-medium">Research failed. Please try again.</p>
                     )}
@@ -85,11 +149,13 @@ export default function ResearchStatus() {
             {/* Results View */}
             {results && (
                 <div className="space-y-6">
-                    <Tabs defaultValue="summary">
-                        <TabsList>
-                            <TabsTrigger value="summary">Analysis Summary</TabsTrigger>
+                    <Tabs defaultValue="summary" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 lg:grid-cols-5">
+                            <TabsTrigger value="summary">Summary</TabsTrigger>
+                            <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                            <TabsTrigger value="map">Map</TabsTrigger>
                             <TabsTrigger value="sources">Sources ({results.total_sources})</TabsTrigger>
-                            {results.generated_script && <TabsTrigger value="script">YouTube Script</TabsTrigger>}
+                            <TabsTrigger value="script" disabled={!results.generated_script}>Script</TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="summary" className="space-y-4">
@@ -101,6 +167,24 @@ export default function ResearchStatus() {
                                             {JSON.stringify(results.analysis_summary, null, 2)}
                                         </pre>
                                     </div>
+                                </CardContent>
+                            </Card>
+                        </TabsContent>
+
+                        <TabsContent value="timeline" className="space-y-4">
+                            <Card>
+                                <CardHeader><CardTitle>Historical Timeline</CardTitle></CardHeader>
+                                <CardContent>
+                                    <Timeline events={results.timeline_events || []} />
+                                </CardContent>
+                            </Card>
+                        </TabsContent>
+
+                        <TabsContent value="map" className="space-y-4">
+                            <Card>
+                                <CardHeader><CardTitle>Geographic Context</CardTitle></CardHeader>
+                                <CardContent className="p-0 overflow-hidden">
+                                    <HistoricalMap locations={results.locations || []} />
                                 </CardContent>
                             </Card>
                         </TabsContent>
